@@ -1,133 +1,142 @@
 #include <Arduino.h>
-#include "RotaryEncoder.h"
+#include <RotaryEncoder.h>
 #include <AccelStepper.h>
+#include <LcdMenu.h>
+#include <interface/LiquidCrystalAdapter.h>
+#include <utils/commandProccesors.h>
 
-#define UNO
+#define NANO
 
 #ifdef STM32F103
-#define COIL_ROTATION_MOTOR_STEP_PIN 27 //PB1
-#define COIL_ROTATION_MOTOR_DIR_PIN 28 //PB0
-#define SPOOL_POSITION_MOTOR_STEP_PIN 29 //PB5
-#define SPOOL_POSITION_MOTOR_DIR_PIN 30 //PB4
+#define COIL_ROTATION_MOTOR_STEP_PIN 27  // PB1
+#define COIL_ROTATION_MOTOR_DIR_PIN 28   // PB0
+#define SPOOL_POSITION_MOTOR_STEP_PIN 29 // PB5
+#define SPOOL_POSITION_MOTOR_DIR_PIN 30  // PB4
 #endif
-#ifdef UNO
-#define COIL_ROTATION_MOTOR_STEP_PIN 8
-#define COIL_ROTATION_MOTOR_DIR_PIN 9
-#define SPOOL_POSITION_MOTOR_STEP_PIN 10
-#define SPOOL_POSITION_MOTOR_DIR_PIN 11
+#ifdef NANO
+
+#define COIL_ROTATION_MOTOR_STEP_PIN 6
+#define COIL_ROTATION_MOTOR_DIR_PIN 5
+#define COIL_ROTATION_MOTOR_NUM_STEPS 200
+#define COIL_ROTATION_MOTOR_MICROSTEPS 8
+
+#define SPOOL_POSITION_MOTOR_STEP_PIN 7
+#define SPOOL_POSITION_MOTOR_DIR_PIN 8
+#define SPOOL_POSITION_MOTOR_NUM_STEPS 200
+#define SPOOL_POSITION_MOTOR_MICROSTEPS 8
+
 #define ROTARY_ENCODER_CLK_PIN 2
 #define ROTARY_ENCODER_DT_PIN 3
 #define ROTARY_ENCODER_SW_PIN 4
+
+#define LCD_ROWS 2
+#define LCD_COLS 16
+#define LCD_V0_PIN 11
+#define LCD_RS_PIN 15 // A1
+#define LCD_RW_PIN 16 // A2
+#define LCD_E_PIN 17  // A3
+#define LCD_D4_PIN 18 // A4
+#define LCD_D5_PIN 19 // A5
+#define LCD_D6_PIN 10
+#define LCD_D7_PIN 9
 #endif
 
 #define STEPS_PER_REVOLUTION 200
-#define WIRE_DIAMETER 0.11176 //mm (0.0044 in)
-#define COIL_DIAMETER 73.0 //mm
-#define LEAD 8 //mm
-#define COIL_GEAR_RATIO 20/50
-#define MAX_ENCODER_POSITION 50.0
-#define ENCODER_TO_SPEED_RATIO 5
+#define WIRE_DIAMETER 0.1143 // mm (0.0045 in)
+#define COIL_DIAMETER 73.0    // mm
+#define LEAD 8                // mm
+#define COIL_ROTATION_GEAR_RATIO 2.5
+#define BASE_SPEED 100
 
+int encoderPosition = 0;
+unsigned long spoolPositionRotationRatio = WIRE_DIAMETER / LEAD;
+bool motorsEnabled = false;
+int previousTime = millis();
+bool menuOpened = false;
 
-int EncoderPosition = 0; 
-unsigned long coilPreviousTime = 0;
-unsigned long coilDelay = 0;
-unsigned long spoolPreviousTime = 0;
-unsigned long spoolDelay = 0;
-unsigned long printPreviousTime = 0;
-unsigned long delayRatio = LEAD * (1/WIRE_DIAMETER); // delay ratio between the two motors, the spool spins slower, so the delay is greator
-void RotaryChanged(); //we need to declare the func above so Rotary goes to the one below
+void initializeInfoScreen() {
+  lcdAdapter.lcd.clear();
+  lcdAdapter.lcd.setCursor(0, 0);
+  lcdAdapter.lcd.print("Speed: ");
+  lcdAdapter.lcd.setCursor(7, 0);
+  lcdAdapter.lcd.print(encoderPosition);
+}
 
-RotaryEncoder Rotary(&RotaryChanged, ROTARY_ENCODER_DT_PIN, ROTARY_ENCODER_CLK_PIN, ROTARY_ENCODER_SW_PIN); // Pins 2 (DT), 3 (CLK), 4 (SW)
+void updateInfoScreen() {
+  lcdAdapter.lcd.setCursor(7, 0);
+  lcdAdapter.lcd.print(encoderPosition);
+}
 
-void RotaryChanged()
+AccelStepper coil_rotation_driver(AccelStepper::DRIVER, COIL_ROTATION_MOTOR_STEP_PIN, COIL_ROTATION_MOTOR_DIR_PIN);
+
+AccelStepper spool_position_driver(AccelStepper::DRIVER, SPOOL_POSITION_MOTOR_STEP_PIN, SPOOL_POSITION_MOTOR_DIR_PIN);
+
+LiquidCrystalAdapter lcdAdapter(LCD_RS_PIN, LCD_E_PIN, LCD_D4_PIN, LCD_D5_PIN, LCD_D6_PIN, LCD_D7_PIN, LCD_COLS, LCD_ROWS);
+
+LcdMenu menu(lcdAdapter);
+
+void encoderClicked()
 {
-  const unsigned int state = Rotary.GetState();
-  
-  if (state & DIR_CW)  
-    EncoderPosition++;
-    
-  if (state & DIR_CCW)  
-    EncoderPosition--;    
-  
-  if (EncoderPosition < 0)
-    EncoderPosition = 0;
+  if (!menuOpened) {
 
-  if (EncoderPosition > MAX_ENCODER_POSITION)
-    EncoderPosition = MAX_ENCODER_POSITION;
-
-  coilDelay =  1e6 / (EncoderPosition * ENCODER_TO_SPEED_RATIO);
-  spoolDelay = coilDelay * delayRatio;
+  }
+  // if (speed == 0)
+  // {
+  //   speed = BASE_SPEED;
+  //   coil_rotation_driver.setSpeed(speed * encoderPosition * COIL_ROTATION_GEAR_RATIO);
+  //   spool_position_driver.setSpeed(speed * encoderPosition * spoolPositionRotationRatio);
+  // }
+  // else
+  // {
+  //   speed = 0;
+  //   coil_rotation_driver.setSpeed(speed);
+  //   spool_position_driver.setSpeed(speed);
+  // }
 }
 
-
-void setup() {
-  pinMode(COIL_ROTATION_MOTOR_STEP_PIN, OUTPUT);
-  pinMode(COIL_ROTATION_MOTOR_DIR_PIN, OUTPUT);
-  pinMode(SPOOL_POSITION_MOTOR_STEP_PIN, OUTPUT);
-  pinMode(SPOOL_POSITION_MOTOR_DIR_PIN, OUTPUT);
-
-  digitalWrite(COIL_ROTATION_MOTOR_DIR_PIN, HIGH);
-  digitalWrite(SPOOL_POSITION_MOTOR_DIR_PIN, HIGH);
-
-  Rotary.setup();  
-  Serial.begin(9600);  
-  Serial.println("Rotary Encoder Tests"); 
+void encoderPositionChanged(int position)
+{
+  Serial.println(position);
+  encoderPosition = position;
+  // coil_rotation_driver.setSpeed(encoderPosition * COIL_ROTATION_GEAR_RATIO);
+  // spool_position_driver.setSpeed(encoderPosition * spoolPositionRotationRatio);
+  coil_rotation_driver.setSpeed(BASE_SPEED * encoderPosition);
+  spool_position_driver.setSpeed(BASE_SPEED * encoderPosition);
 }
 
-void loop() {
-  if (coilDelay > 0 && spoolDelay > 0) {
-    if (micros() - coilPreviousTime > coilDelay) {
-      digitalWrite(COIL_ROTATION_MOTOR_STEP_PIN, HIGH);
-      delayMicroseconds(1);
-      digitalWrite(COIL_ROTATION_MOTOR_STEP_PIN, LOW);
-      coilPreviousTime = micros();
-    }
-    if (micros() - spoolPreviousTime > spoolDelay) {
-      digitalWrite(SPOOL_POSITION_MOTOR_STEP_PIN, HIGH);
-      delayMicroseconds(1);
-      digitalWrite(SPOOL_POSITION_MOTOR_STEP_PIN, LOW);
-      spoolPreviousTime = micros();
-    }
-  }
-  else {
-    digitalWrite(COIL_ROTATION_MOTOR_STEP_PIN, LOW);
-    digitalWrite(SPOOL_POSITION_MOTOR_STEP_PIN, LOW);
-  }
-  if (micros() - printPreviousTime > 1e6) {
-    Serial.println("Encoder Position: " + String(EncoderPosition));
-    Serial.println("Coil Delay: " + String(coilDelay) + " Spool Delay: " + String(spoolDelay));
-    printPreviousTime = micros();
-  }
+RotaryEncoder encoder(ROTARY_ENCODER_DT_PIN, ROTARY_ENCODER_CLK_PIN, ROTARY_ENCODER_SW_PIN, &encoderClicked, &encoderPositionChanged);
+
+void setup()
+{
+  pinMode(LCD_RW_PIN, OUTPUT);
+  digitalWrite(LCD_RW_PIN, LOW);
+  pinMode(LCD_V0_PIN, OUTPUT);
+  analogWrite(LCD_V0_PIN,50);
+  lcdAdapter.begin();	
+  initializeInfoScreen();
+
+  encoder.begin();
+
+  coil_rotation_driver.setMaxSpeed(1000);
+  coil_rotation_driver.setSpeed(0);
+  coil_rotation_driver.setAcceleration(50);
+  spool_position_driver.setMaxSpeed(1000);
+  spool_position_driver.setSpeed(0);
+  spool_position_driver.setAcceleration(50);
 }
 
+void loop()
+{
+  encoder.tick();
+  updateInfoScreen();
+  if (motorsEnabled) {
+  coil_rotation_driver.runSpeed();
+  spool_position_driver.runSpeed();
+  }
 
-// // Define some steppers and the pins the will use
-// AccelStepper stepper1; // Defaults to AccelStepper::FULL4WIRE (4 pins) on 2, 3, 4, 5
-// AccelStepper stepper2(AccelStepper::FULL4WIRE, 6, 7, 8, 9);
-// AccelStepper stepper3(AccelStepper::FULL2WIRE, 10, 11);
-
-// void setup()
-// {  
-//     stepper1.setMaxSpeed(200.0);
-//     stepper1.setAcceleration(100.0);
-//     stepper1.moveTo(24);
-    
-//     stepper2.setMaxSpeed(300.0);
-//     stepper2.setAcceleration(100.0);
-//     stepper2.moveTo(1000000);
-    
-//     stepper3.setMaxSpeed(300.0);
-//     stepper3.setAcceleration(100.0);
-//     stepper3.moveTo(1000000); 
-// }
-
-// void loop()
-// {
-//     // Change direction at the limits
-//     if (stepper1.distanceToGo() == 0)
-// 	stepper1.moveTo(-stepper1.currentPosition());
-//     stepper1.run();
-//     stepper2.run();
-//     stepper3.run();
-// }
+  // if (millis() - previousTime >= 1000) {
+  //   previousTime = millis();
+  //   Serial.print("Encoder Position: ");
+  //   Serial.println(encoderPosition);
+  // }
+};
