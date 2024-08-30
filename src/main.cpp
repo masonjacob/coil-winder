@@ -18,12 +18,12 @@
 #define COIL_ROTATION_MOTOR_STEP_PIN 6
 #define COIL_ROTATION_MOTOR_DIR_PIN 5
 #define COIL_ROTATION_MOTOR_NUM_STEPS 200
-#define COIL_ROTATION_MOTOR_MICROSTEPS 8
+#define COIL_ROTATION_MOTOR_MICROSTEPS 1
 
 #define SPOOL_POSITION_MOTOR_STEP_PIN 7
 #define SPOOL_POSITION_MOTOR_DIR_PIN 8
 #define SPOOL_POSITION_MOTOR_NUM_STEPS 200
-#define SPOOL_POSITION_MOTOR_MICROSTEPS 8
+#define SPOOL_POSITION_MOTOR_MICROSTEPS 32
 
 #define ROTARY_ENCODER_CLK_PIN 2
 #define ROTARY_ENCODER_DT_PIN 3
@@ -43,29 +43,25 @@
 
 #define STEPS_PER_REVOLUTION 200
 #define WIRE_DIAMETER 0.1143 // mm (0.0045 in)
-#define COIL_DIAMETER 73.0    // mm
-#define LEAD 8                // mm
+#define COIL_DIAMETER 73.0   // mm
+#define LEAD 8               // mm
 #define COIL_ROTATION_GEAR_RATIO 2.5
 #define BASE_SPEED 100
+#define MIN_ENCODER 0
+#define MAX_ENCODER 4
 
 int encoderPosition = 0;
-unsigned long spoolPositionRotationRatio = WIRE_DIAMETER / LEAD;
-bool motorsEnabled = false;
-int previousTime = millis();
+double spoolPositionRotationRatio = (WIRE_DIAMETER / LEAD);
+bool motorsEnabled = true;
 bool menuOpened = false;
+int numberOfRotations = 0;
+int numberOfSteps = 0;
 
-void initializeInfoScreen() {
-  lcdAdapter.lcd.clear();
-  lcdAdapter.lcd.setCursor(0, 0);
-  lcdAdapter.lcd.print("Speed: ");
-  lcdAdapter.lcd.setCursor(7, 0);
-  lcdAdapter.lcd.print(encoderPosition);
-}
-
-void updateInfoScreen() {
-  lcdAdapter.lcd.setCursor(7, 0);
-  lcdAdapter.lcd.print(encoderPosition);
-}
+void encoderClicked();
+void encoderPositionChanged(int position);
+void initializeInfoScreen();
+void updateInfoScreen();
+void updateSteps();
 
 AccelStepper coil_rotation_driver(AccelStepper::DRIVER, COIL_ROTATION_MOTOR_STEP_PIN, COIL_ROTATION_MOTOR_DIR_PIN);
 
@@ -75,11 +71,15 @@ LiquidCrystalAdapter lcdAdapter(LCD_RS_PIN, LCD_E_PIN, LCD_D4_PIN, LCD_D5_PIN, L
 
 LcdMenu menu(lcdAdapter);
 
+RotaryEncoder encoder(ROTARY_ENCODER_DT_PIN, ROTARY_ENCODER_CLK_PIN, ROTARY_ENCODER_SW_PIN, &encoderClicked, &encoderPositionChanged);
+
 void encoderClicked()
 {
-  if (!menuOpened) {
-
-  }
+  numberOfRotations = 0;
+  updateInfoScreen();
+  // if (!menuOpened)
+  // {
+  // }
   // if (speed == 0)
   // {
   //   speed = BASE_SPEED;
@@ -96,23 +96,78 @@ void encoderClicked()
 
 void encoderPositionChanged(int position)
 {
-  Serial.println(position);
-  encoderPosition = position;
-  // coil_rotation_driver.setSpeed(encoderPosition * COIL_ROTATION_GEAR_RATIO);
-  // spool_position_driver.setSpeed(encoderPosition * spoolPositionRotationRatio);
-  coil_rotation_driver.setSpeed(BASE_SPEED * encoderPosition);
-  spool_position_driver.setSpeed(BASE_SPEED * encoderPosition);
+  if (position < MIN_ENCODER)
+  {
+    encoderPosition = MIN_ENCODER;
+  }
+  else if (position > MAX_ENCODER)
+  {
+    encoderPosition = MAX_ENCODER;
+  }
+  else
+  {
+    encoderPosition = position;
+  }
+  coil_rotation_driver.setSpeed(BASE_SPEED * encoderPosition * COIL_ROTATION_GEAR_RATIO * COIL_ROTATION_MOTOR_MICROSTEPS);
+  spool_position_driver.setSpeed(BASE_SPEED * encoderPosition * spoolPositionRotationRatio * SPOOL_POSITION_MOTOR_MICROSTEPS);
+  // Serial.print("Coil Rotation Speed: ");
+  // Serial.print(coil_rotation_driver.speed());
+  // Serial.print(" Spool Position Speed: ");
+  // Serial.println(spool_position_driver.speed());
+
+  if (!menuOpened)
+  {
+    updateInfoScreen();
+  }
 }
 
-RotaryEncoder encoder(ROTARY_ENCODER_DT_PIN, ROTARY_ENCODER_CLK_PIN, ROTARY_ENCODER_SW_PIN, &encoderClicked, &encoderPositionChanged);
+void updateSteps()
+{
+  numberOfSteps++;
+  if (numberOfSteps == STEPS_PER_REVOLUTION * COIL_ROTATION_GEAR_RATIO)
+  {
+    numberOfRotations++;
+    numberOfSteps = 0;
+    updateInfoScreen();
+  }
+}
+
+void initializeInfoScreen()
+{
+  lcdAdapter.lcd.clear();
+  lcdAdapter.lcd.setCursor(0, 0);
+  lcdAdapter.lcd.print("Speed:");
+  lcdAdapter.lcd.setCursor(6, 0);
+  lcdAdapter.lcd.print("    ");
+  lcdAdapter.lcd.setCursor(7, 0);
+  lcdAdapter.lcd.print(encoderPosition);
+  lcdAdapter.lcd.setCursor(0, 1);
+  lcdAdapter.lcd.print("Revolutions:");
+  lcdAdapter.lcd.setCursor(12, 1);
+  lcdAdapter.lcd.print("    ");
+  lcdAdapter.lcd.setCursor(13, 1);
+  lcdAdapter.lcd.print(numberOfRotations);
+}
+
+void updateInfoScreen()
+{
+  lcdAdapter.lcd.setCursor(6, 0);
+  lcdAdapter.lcd.print("    ");
+  lcdAdapter.lcd.setCursor(7, 0);
+  lcdAdapter.lcd.print(encoderPosition);
+  lcdAdapter.lcd.setCursor(12, 1);
+  lcdAdapter.lcd.print("    ");
+  lcdAdapter.lcd.setCursor(13, 1);
+  lcdAdapter.lcd.print(numberOfRotations);
+}
 
 void setup()
 {
   pinMode(LCD_RW_PIN, OUTPUT);
   digitalWrite(LCD_RW_PIN, LOW);
   pinMode(LCD_V0_PIN, OUTPUT);
-  analogWrite(LCD_V0_PIN,50);
-  lcdAdapter.begin();	
+  analogWrite(LCD_V0_PIN, 50);
+  lcdAdapter.begin();
   initializeInfoScreen();
 
   encoder.begin();
@@ -128,15 +183,13 @@ void setup()
 void loop()
 {
   encoder.tick();
-  updateInfoScreen();
-  if (motorsEnabled) {
-  coil_rotation_driver.runSpeed();
-  spool_position_driver.runSpeed();
+  if (motorsEnabled)
+  {
+    bool stepped = coil_rotation_driver.runSpeed();
+    spool_position_driver.runSpeed();
+    if (stepped)
+    {
+      updateSteps();
+    }
   }
-
-  // if (millis() - previousTime >= 1000) {
-  //   previousTime = millis();
-  //   Serial.print("Encoder Position: ");
-  //   Serial.println(encoderPosition);
-  // }
 };
