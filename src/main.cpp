@@ -47,7 +47,7 @@
 #define LEAD 8               // mm
 #define COIL_ROTATION_GEAR_RATIO 2.5
 #define BASE_SPEED 100
-#define MIN_ENCODER 0
+#define MIN_ENCODER -1
 #define MAX_ENCODER 4
 
 int encoderPosition = 0;
